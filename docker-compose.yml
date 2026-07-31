@@ -4,6 +4,39 @@
 
 name: superset-bi
 
+x-superset-image: &superset-image
+  build:
+    context: ./superset
+    dockerfile: Dockerfile
+  image: local/superset-bi:6.1.0
+
+x-superset-env: &superset-env
+  SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY}
+  SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
+  SUPERSET_APP_ROOT: ${SUPERSET_APP_ROOT:-/bi}
+  FLASK_APP: "superset.app:create_app(superset_app_root='/bi')"
+  AUTH_USER_REGISTRATION_ROLE: ${AUTH_USER_REGISTRATION_ROLE:-Admin}
+  SUPERSET_DB: ${SUPERSET_DB}
+  SUPERSET_DB_USER: ${SUPERSET_DB_USER}
+  SUPERSET_DB_PASSWORD: ${SUPERSET_DB_PASSWORD}
+  SUPERSET_DB_HOST: postgres
+  SUPERSET_DB_PORT: "5432"
+  SUPERSET_ADMIN_USERNAME: ${SUPERSET_ADMIN_USERNAME}
+  SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD}
+  SUPERSET_ADMIN_EMAIL: ${SUPERSET_ADMIN_EMAIL}
+  KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID}
+  KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET}
+  KEYCLOAK_EXTERNAL_URL: ${KEYCLOAK_EXTERNAL_URL}
+  KEYCLOAK_INTERNAL_URL: ${KEYCLOAK_INTERNAL_URL:-http://keycloak:8080/auth}
+  KEYCLOAK_REALM: ${KEYCLOAK_REALM:-bi}
+  KEYCLOAK_DISCOVERY_URL: ${KEYCLOAK_DISCOVERY_URL}
+  KEYCLOAK_API_BASE_URL: ${KEYCLOAK_API_BASE_URL}
+
+x-superset-volumes: &superset-volumes
+  - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro,Z
+  - ./superset/keycloak_userinfo.py:/app/pythonpath/keycloak_userinfo.py:ro,Z
+  - superset_home:/app/superset_home
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -59,36 +92,42 @@ services:
     networks:
       - bi
 
-  superset:
-    image: apache/superset:6.1.0
-    user: root
-    command: ["/app/docker/bootstrap.sh"]
+  # One-shot: migrations + local admin fallback + roles (same image as app).
+  superset-init:
+    <<: *superset-image
     environment:
-      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY}
-      SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
-      SUPERSET_APP_ROOT: ${SUPERSET_APP_ROOT:-/bi}
-      FLASK_APP: "superset.app:create_app(superset_app_root='/bi')"
-      AUTH_USER_REGISTRATION_ROLE: ${AUTH_USER_REGISTRATION_ROLE:-Admin}
-      SUPERSET_DB: ${SUPERSET_DB}
-      SUPERSET_DB_USER: ${SUPERSET_DB_USER}
-      SUPERSET_DB_PASSWORD: ${SUPERSET_DB_PASSWORD}
-      SUPERSET_DB_HOST: postgres
-      SUPERSET_DB_PORT: "5432"
-      SUPERSET_ADMIN_USERNAME: ${SUPERSET_ADMIN_USERNAME}
-      SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD}
-      SUPERSET_ADMIN_EMAIL: ${SUPERSET_ADMIN_EMAIL}
-      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID}
-      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET}
-      KEYCLOAK_EXTERNAL_URL: ${KEYCLOAK_EXTERNAL_URL}
-      KEYCLOAK_INTERNAL_URL: ${KEYCLOAK_INTERNAL_URL:-http://keycloak:8080/auth}
-      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-bi}
-      KEYCLOAK_DISCOVERY_URL: ${KEYCLOAK_DISCOVERY_URL}
-      KEYCLOAK_API_BASE_URL: ${KEYCLOAK_API_BASE_URL}
-    volumes:
-      - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro,Z
-      - ./superset/keycloak_userinfo.py:/app/pythonpath/keycloak_userinfo.py:ro,Z
-      - ./superset/bootstrap.sh:/app/docker/bootstrap.sh:ro,Z
-      - superset_home:/app/superset_home
+      <<: *superset-env
+    volumes: *superset-volumes
+    command:
+      - /bin/bash
+      - -c
+      - |
+        set -euo pipefail
+        echo "[superset-init] db upgrade..."
+        superset db upgrade
+        echo "[superset-init] ensure local admin (fallback; primary auth is Keycloak)..."
+        superset fab create-admin \
+          --username "${SUPERSET_ADMIN_USERNAME:-admin}" \
+          --firstname Admin \
+          --lastname User \
+          --email "${SUPERSET_ADMIN_EMAIL:-admin@example.com}" \
+          --password "${SUPERSET_ADMIN_PASSWORD:-admin}" \
+          || true
+        echo "[superset-init] init roles/perms..."
+        superset init
+        echo "[superset-init] done."
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - bi
+
+  superset:
+    <<: *superset-image
+    environment:
+      <<: *superset-env
+    volumes: *superset-volumes
     # Token exchange uses http://demo.io/auth → host gateway :80 → this gateway → keycloak
     extra_hosts:
       - "${BI_HOSTNAME:-demo.io}:host-gateway"
@@ -97,6 +136,8 @@ services:
         condition: service_healthy
       keycloak:
         condition: service_healthy
+      superset-init:
+        condition: service_completed_successfully
     healthcheck:
       test:
         [

@@ -40,7 +40,7 @@ open questions:
 | `/bi` strategy | Strategy A — `SUPERSET_APP_ROOT=/bi`, gateway does **not** strip prefix |
 | Keycloak URL | Same origin `http://demo.io/auth` via gateway |
 | Postgres | One instance, two DBs (`superset`, `keycloak`) |
-| Superset version | `apache/superset:6.1.0` |
+| Superset version | Custom image from `apache/superset:6.1.0` (`superset/Dockerfile`) |
 | Redis/Celery | Deferred |
 | Roles | Self-register as `Admin` (demo) |
 | Hostnames | `demo.io` → loopback via `make setup` (also allows :80) |
@@ -50,9 +50,13 @@ open questions:
 ```
 docker-compose.yml
 gateway/application.yml
+superset/Dockerfile              # Authlib + psycopg2 at build time
 superset/superset_config.py
-superset/bootstrap.sh
+superset/keycloak_userinfo.py
 keycloak/realm-export.json
 db/init-multiple-dbs.sh
 scripts/smoke.sh
 ```
+
+`superset-init` (one-shot Compose service) runs `db upgrade`, creates the local
+admin fallback, and `superset init`. The app container only starts the server.

@@ -9,7 +9,11 @@ Date: 2026-07-31
    `extra_hosts: localhost:host-gateway` so browser and token exchange share
    `http://localhost:8081` (issuer match).
 2. **Postgres:** single `postgres:16-alpine` with two DBs via `db/init-multiple-dbs.sh`.
-3. **Superset:** pinned `apache/superset:6.1.0` + `SUPERSET_APP_ROOT=/bi`.
+3. **Superset:** custom image from `apache/superset:6.1.0` (`superset/Dockerfile`)
+   installs `authlib` + `psycopg2-binary` at build time via `uv pip` (official
+   lean-image pattern). `superset-init` one-shot service runs migrations/admin/init;
+   the app container uses the image default entrypoint (no `bootstrap.sh`).
+   `SUPERSET_APP_ROOT=/bi`.
 4. **Redis/Celery:** deferred.
 5. **Roles:** `AUTH_USER_REGISTRATION_ROLE = Gamma`; no Keycloak role sync yet.
    Claim mapping lives in `superset/keycloak_userinfo.py`.
@@ -35,6 +39,13 @@ make smoke   # HTTP acceptance checks (includes /bi/login/keycloak -> Keycloak)
 ```
 
 Manual SSO: open `http://demo.io/bi/login/` (run `make setup` first), login as `analyst` / `analyst` → **Admin**.
+
+## Custom image + init (2026-07-31)
+
+- Removed runtime `uv pip install` from a mounted `bootstrap.sh`.
+- Compose builds `local/superset-bi:6.1.0`; `superset` depends on
+  `superset-init` (`service_completed_successfully`).
+- `make up` uses `docker compose up -d --build`.
 
 ## Notes from bring-up
 

@@ -15,10 +15,10 @@ setup hosts:
 	@bash scripts/install-hosts.sh
 
 up: env
-	@docker compose up -d || { \
+	@docker compose up -d --build || { \
 	  echo; \
 	  echo "If port 80 failed (rootless), run:  make setup   # sudo once"; \
-	  echo "Then:  docker compose up -d"; \
+	  echo "Then:  docker compose up -d --build"; \
 	  exit 1; \
 	}
 	@echo "App:  http://$${BI_HOSTNAME:-demo.io}/bi/"
@@ -42,6 +42,7 @@ reset:
 
 test:
 	@python3 scripts/test_keycloak_userinfo.py
+	@python3 scripts/test_superset_dockerfile.py
 
 verify: test smoke
 

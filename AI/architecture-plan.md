@@ -152,8 +152,9 @@ Proposed repo layout:
 ├── gateway/
 │   └── application.yml           # SCG routes (or SPRING_APPLICATION_JSON in compose)
 ├── superset/
+│   ├── Dockerfile                # lean image + Authlib + psycopg2
 │   ├── superset_config.py        # OAuth + app root + proxy fix
-│   └── bootstrap.sh              # db upgrade, admin, init (optional)
+│   └── keycloak_userinfo.py      # claim mapping (compose: superset-init for db/admin)
 ├── keycloak/
 │   └── realm-export.json         # realm + superset client (import on start)
 └── db/
