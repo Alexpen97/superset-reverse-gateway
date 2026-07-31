@@ -1,0 +1,147 @@
+# Local demo stack: demo.io/bi (Superset) + demo.io/auth (Keycloak) via Gateway :80
+# WARNING: vulhub/spring-cloud-gateway:3.1.0 is intentionally vulnerable (CVE-2022-22947).
+# Bind is restricted to loopback — do not expose beyond localhost.
+
+name: superset-bi
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      SUPERSET_DB: ${SUPERSET_DB}
+      SUPERSET_DB_USER: ${SUPERSET_DB_USER}
+      SUPERSET_DB_PASSWORD: ${SUPERSET_DB_PASSWORD}
+      KEYCLOAK_DB: ${KEYCLOAK_DB}
+      KEYCLOAK_DB_USER: ${KEYCLOAK_DB_USER}
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/01-init-multiple-dbs.sh:ro,Z
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - bi
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.1.4
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/${KEYCLOAK_DB}
+      KC_DB_USERNAME: ${KEYCLOAK_DB_USER}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+      # Same origin as the app: http://demo.io/auth/...
+      KC_HOSTNAME: http://${BI_HOSTNAME:-demo.io}/auth
+      KC_HTTP_RELATIVE_PATH: /auth
+      KC_HOSTNAME_STRICT: "false"
+      KC_PROXY_HEADERS: xforwarded
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro,Z
+    # Not published — only reachable via gateway /auth
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+    networks:
+      - bi
+
+  superset:
+    image: apache/superset:6.1.0
+    user: root
+    command: ["/app/docker/bootstrap.sh"]
+    environment:
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY}
+      SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
+      SUPERSET_APP_ROOT: ${SUPERSET_APP_ROOT:-/bi}
+      FLASK_APP: "superset.app:create_app(superset_app_root='/bi')"
+      AUTH_USER_REGISTRATION_ROLE: ${AUTH_USER_REGISTRATION_ROLE:-Admin}
+      SUPERSET_DB: ${SUPERSET_DB}
+      SUPERSET_DB_USER: ${SUPERSET_DB_USER}
+      SUPERSET_DB_PASSWORD: ${SUPERSET_DB_PASSWORD}
+      SUPERSET_DB_HOST: postgres
+      SUPERSET_DB_PORT: "5432"
+      SUPERSET_ADMIN_USERNAME: ${SUPERSET_ADMIN_USERNAME}
+      SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD}
+      SUPERSET_ADMIN_EMAIL: ${SUPERSET_ADMIN_EMAIL}
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID}
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET}
+      KEYCLOAK_EXTERNAL_URL: ${KEYCLOAK_EXTERNAL_URL}
+      KEYCLOAK_INTERNAL_URL: ${KEYCLOAK_INTERNAL_URL:-http://keycloak:8080/auth}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-bi}
+      KEYCLOAK_DISCOVERY_URL: ${KEYCLOAK_DISCOVERY_URL}
+      KEYCLOAK_API_BASE_URL: ${KEYCLOAK_API_BASE_URL}
+    volumes:
+      - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro,Z
+      - ./superset/keycloak_userinfo.py:/app/pythonpath/keycloak_userinfo.py:ro,Z
+      - ./superset/bootstrap.sh:/app/docker/bootstrap.sh:ro,Z
+      - superset_home:/app/superset_home
+    # Token exchange uses http://demo.io/auth → host gateway :80 → this gateway → keycloak
+    extra_hosts:
+      - "${BI_HOSTNAME:-demo.io}:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8088/bi/health')\"",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+      start_period: 90s
+    networks:
+      - bi
+
+  gateway:
+    image: vulhub/spring-cloud-gateway:3.1.0
+    environment:
+      SPRING_CONFIG_ADDITIONAL_LOCATION: file:/config/
+    volumes:
+      - ./gateway/application.yml:/config/application.yml:ro,Z
+    ports:
+      # Port 80 for http://demo.io/bi (requires `make setup` / unprivileged port sysctl)
+      - "${GATEWAY_HOST_BIND:-127.0.0.1}:${GATEWAY_PORT:-80}:8080"
+      - "[::1]:${GATEWAY_PORT:-80}:8080"
+    depends_on:
+      keycloak:
+        condition: service_healthy
+      superset:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080'",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+    networks:
+      - bi
+
+volumes:
+  postgres_data:
+  superset_home:
+
+networks:
+  bi:
+    driver: bridge

@@ -1,0 +1,71 @@
+{
+  "realm": "bi",
+  "enabled": true,
+  "displayName": "BI",
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": false,
+  "clients": [
+    {
+      "clientId": "superset",
+      "name": "Apache Superset",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "superset-client-secret-change-me",
+      "clientAuthenticatorType": "client-secret",
+      "redirectUris": [
+        "http://demo.io/bi/oauth-authorized/keycloak",
+        "http://127.0.0.1/bi/oauth-authorized/keycloak",
+        "http://localhost/bi/oauth-authorized/keycloak"
+      ],
+      "webOrigins": [
+        "http://demo.io",
+        "http://127.0.0.1",
+        "http://localhost"
+      ],
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": true,
+      "attributes": {
+        "post.logout.redirect.uris": "http://demo.io/bi/*##http://127.0.0.1/bi/*##http://localhost/bi/*"
+      },
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access",
+        "microprofile-jwt"
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "analyst",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Ana",
+      "lastName": "Lyst",
+      "email": "analyst@example.com",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "analyst",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

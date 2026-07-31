@@ -1,0 +1,41 @@
+# Spring Cloud Gateway 3.1.0 (vulhub image)
+# - /bi  → Superset (app root /bi, no strip)
+# - /auth → Keycloak (KC_HTTP_RELATIVE_PATH=/auth)
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+spring:
+  cloud:
+    gateway:
+      x-forwarded:
+        prefix-enabled: true
+      routes:
+        - id: superset-bi
+          uri: http://superset:8088
+          predicates:
+            - Path=/bi/**
+          filters:
+            - PreserveHostHeader
+
+        # Keycloak served under /auth on the same host (portless demo.io/auth)
+        - id: keycloak-auth
+          uri: http://keycloak:8080
+          predicates:
+            - Path=/auth,/auth/**
+          filters:
+            - PreserveHostHeader
+
+        # Compat: Superset 6.x login SPA hardcodes absolute /login/<provider>
+        - id: superset-auth-compat
+          uri: http://superset:8088
+          predicates:
+            - Path=/login/**,/logout/**,/oauth-authorized/**,/user_info/**
+          filters:
+            - PreserveHostHeader
+            - PrefixPath=/bi
